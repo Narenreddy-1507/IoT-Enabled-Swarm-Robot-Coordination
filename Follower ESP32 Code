@@ -1,0 +1,173 @@
+#include <WiFi.h> 
+#include <esp_now.h> 
+#include <esp_wifi.h> 
+ 
+// Leader MAC Address 
+uint8_t leaderMAC[] = {0xD4, 0xE9, 0xF4, 0x60, 0x13, 0x68}; 
+ 
+// Ultrasonic Sensor Pins 
+#define TRIG 5 
+#define ECHO 18 
+ 
+// Motor Driver Pins 
+#define IN1 26 
+#define IN2 27 
+#define IN3 14 
+#define IN4 12 
+ 
+// Command Structure 
+typedef struct { 
+  char command[20]; 
+} Command; 
+ 
+// Slot Data Structure 
+typedef struct { 
+  int slot_id; 
+  int status; 
+} SlotData; 
+ 
+Command receivedCmd; 
+ 
+SlotData data; 
+ 
+// ================= MOTOR CONTROL ================= 
+void moveForward() { 
+  digitalWrite(IN1, HIGH); 
+  digitalWrite(IN2, LOW); 
+  digitalWrite(IN3, HIGH); 
+  digitalWrite(IN4, LOW); 
+} 
+ 
+void moveBackward() { 
+  digitalWrite(IN1, LOW); 
+  digitalWrite(IN2, HIGH); 
+  digitalWrite(IN3, LOW); 
+  digitalWrite(IN4, HIGH); 
+} 
+ 
+void stopMotors() { 
+  digitalWrite(IN1, LOW); 
+  digitalWrite(IN2, LOW); 
+  digitalWrite(IN3, LOW); 
+  digitalWrite(IN4, LOW); 
+} 
+ 
+// ================= DISTANCE MEASUREMENT 
+================= 
+float getDistance() { 
+  digitalWrite(TRIG, LOW); 
+  delayMicroseconds(2); 
+ 
+  digitalWrite(TRIG, HIGH); 
+  delayMicroseconds(10); 
+  digitalWrite(TRIG, LOW); 
+ 
+  long duration = pulseIn(ECHO, HIGH); 
+  return duration * 0.034 / 2; 
+} 
+ 
+// ================= SLOT SCANNING ================= 
+void goToSlot(int slot) { 
+  Serial.print("Scan Slot "); 
+  Serial.println(slot); 
+ 
+  moveForward(); 
+  delay(1500); 
+  stopMotors(); 
+ 
+  float distance = getDistance(); 
+  int status = (distance < 15) ? 1 : 0; 
+ 
+  if (status == 1) 
+    Serial.println("FULL"); 
+  else 
+    Serial.println("EMPTY"); 
+ 
+  data.slot_id = slot; 
+  data.status = status; 
+ 
+  esp_now_send(leaderMAC, (uint8_t *)&data, sizeof(data)); 
+} 
+ 
+// ================= FINAL POSITIONING ================= 
+void goToFinalSlot(int slot) { 
+Serial.print("Final Move to Slot "); 
+Serial.println(slot); 
+if (slot == 4) { 
+Serial.println("Already at Slot 4"); 
+return; 
+} 
+moveBackward(); 
+if (slot == 3) delay(1500); 
+else if (slot == 2) delay(3000); 
+else if (slot == 1) delay(4500); 
+stopMotors(); 
+Serial.println("Reached Slot"); 
+} 
+// Slot scanning commands 
+if (cmd == "GO_SLOT_1") goToSlot(1); 
+else if (cmd == "GO_SLOT_2") goToSlot(2); 
+// ================= RECEIVE FUNCTION ================= 
+void OnDataRecv(const esp_now_recv_info *info, const uint8_t 
+*incomingData, int len) { 
+memcpy(&receivedCmd, incomingData, sizeof(receivedCmd)); 
+String cmd = String(receivedCmd.command); 
+Serial.println(cmd); 
+// Slot scanning commands 
+if (cmd == "GO_SLOT_1") goToSlot(1); 
+else if (cmd == "GO_SLOT_2") goToSlot(2); 
+ 
+  else if (cmd == "GO_SLOT_3") goToSlot(3); 
+  else if (cmd == "GO_SLOT_4") goToSlot(4); 
+ 
+  // Final positioning commands 
+  else if (cmd == "FINAL_SLOT_1") goToFinalSlot(1); 
+  else if (cmd == "FINAL_SLOT_2") goToFinalSlot(2); 
+  else if (cmd == "FINAL_SLOT_3") goToFinalSlot(3); 
+  else if (cmd == "FINAL_SLOT_4") goToFinalSlot(4); 
+ 
+  else if (cmd == "STOP") { 
+    stopMotors(); 
+    Serial.println("STOP"); 
+  } 
+} 
+ 
+// ================= SETUP ================= 
+void setup() { 
+  Serial.begin(115200); 
+ 
+  pinMode(TRIG, OUTPUT); 
+  pinMode(ECHO, INPUT); 
+ 
+  pinMode(IN1, OUTPUT); 
+  pinMode(IN2, OUTPUT); 
+  pinMode(IN3, OUTPUT); 
+  pinMode(IN4, OUTPUT); 
+ 
+  WiFi.mode(WIFI_STA); 
+  WiFi.begin("vinay", "22652925"); 
+ 
+  while (WiFi.status() != WL_CONNECTED) { 
+delay(500); 
+} 
+Serial.println("Follower WiFi Connected"); 
+wifi_second_chan_t second; 
+uint8_t primary; 
+esp_wifi_get_channel(&primary, &second); 
+esp_wifi_set_channel(primary, WIFI_SECOND_CHAN_NONE); 
+if (esp_now_init() != ESP_OK) { 
+Serial.println("ESP-NOW Initialization Failed"); 
+return; 
+} 
+esp_now_register_recv_cb(OnDataRecv); 
+esp_now_peer_info_t peerInfo = {}; 
+memcpy(peerInfo.peer_addr, leaderMAC, 6); 
+peerInfo.channel = primary; 
+peerInfo.encrypt = false; 
+esp_now_add_peer(&peerInfo); 
+Serial.println("Follower Ready"); 
+} 
+// ================= LOOP ================= 
+void loop() {} 
+
+
