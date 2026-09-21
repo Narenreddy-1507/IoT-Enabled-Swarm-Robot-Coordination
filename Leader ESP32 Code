@@ -1,0 +1,184 @@
+#define BLYNK_TEMPLATE_ID "TMPL3NTe7sM9E" 
+#define BLYNK_TEMPLATE_NAME "Message" 
+#define BLYNK_AUTH_TOKEN "Kc5ZcgBn-_zuMRNs4x0b5-sAjSlX8zKk" 
+ 
+#include <WiFi.h> 
+#include <esp_now.h> 
+#include <esp_wifi.h> 
+#include <BlynkSimpleEsp32.h> 
+ 
+#include <Adafruit_GFX.h> 
+#include <Adafruit_PCD8544.h> 
+ 
+// LCD pins 
+#define CLK 18 
+#define DIN 23 
+#define DC 2 
+#define CE 5 
+#define RST 4 
+ 
+Adafruit_PCD8544 display = Adafruit_PCD8544(CLK, DIN, DC, CE, RST); 
+ 
+char ssid[] = "vinay"; 
+char pass[] = "22652925"; 
+ 
+// Follower MAC 
+uint8_t followerMAC[] = {0xB0, 0xCB, 0xD8, 0xF2, 0x56, 0x78}; 
+// Structures 
+typedef struct { 
+char command[20]; 
+} Command; 
+typedef struct { 
+int slot_id; 
+int status; 
+} SlotData; 
+Command cmd; 
+SlotData receivedData; 
+int slots[5]; 
+// ================= SEND ================= 
+void sendCommand(const char *message) { 
+// ================= RECEIVE ================= 
+void OnDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) { 
+memcpy(&receivedData, data, sizeof(receivedData)); 
+slots[receivedData.slot_id] = receivedData.status; 
+Serial.print(" Slot "); 
+Serial.print(receivedData.slot_id); 
+Serial.print(" = "); 
+Serial.println(receivedData.status == 0 ? "EMPTY" : "FULL"); 
+} 
+ 
+  strcpy(cmd.command, message); 
+  esp_now_send(followerMAC, (uint8_t *)&cmd, sizeof(cmd)); 
+ 
+  Serial.print(" Sent: "); 
+  Serial.println(message); 
+} 
+ 
+// ================= SCAN ================= 
+void startScan() { 
+  Serial.println("\n SCAN STARTED"); 
+ 
+  // ===== SHOW SCANNING ===== 
+  display.clearDisplay(); 
+  display.setCursor(0,0); 
+  display.println("Scanning..."); 
+  display.display(); 
+ 
+  // Reset slots 
+  for (int i = 1; i <= 4; i++) slots[i] = -1; 
+ 
+  // Send scan commands 
+  sendCommand("GO_SLOT_1"); delay(2500); 
+  sendCommand("GO_SLOT_2"); delay(2500); 
+  sendCommand("GO_SLOT_3"); delay(2500); 
+  sendCommand("GO_SLOT_4"); delay(2500); 
+  sendCommand("STOP"); 
+ 
+  delay(1500); 
+ 
+  Serial.println("\n FINAL RESULT:"); 
+ 
+  // ===== FINAL SLOT DISPLAY ONLY ===== 
+  display.clearDisplay(); 
+ 
+  display.setCursor(0,0); 
+  display.print("S1:"); 
+  display.print(slots[1]==0?"E":"F"); 
+  display.print(" S2:"); 
+  display.print(slots[2]==0?"E":"F"); 
+ 
+  display.setCursor(0,10); 
+  display.print("S3:"); 
+  display.print(slots[3]==0?"E":"F"); 
+  display.print(" S4:"); 
+  display.print(slots[4]==0?"E":"F"); 
+ 
+  display.display(); 
+ 
+  // ===== FINAL DECISION (NO LCD DISPLAY) ===== 
+  for (int i = 1; i <= 4; i++) { 
+    if (slots[i] == 0) { 
+ 
+      Serial.print(" GO TO SLOT "); 
+      Serial.println(i); 
+ 
+      if (i == 1) sendCommand("FINAL_SLOT_1"); 
+      else if (i == 2) sendCommand("FINAL_SLOT_2"); 
+      else if (i == 3) sendCommand("FINAL_SLOT_3"); 
+      else if (i == 4) sendCommand("FINAL_SLOT_4"); 
+ 
+      return; 
+    } 
+  } 
+ 
+  Serial.println(" PARKING FULL"); 
+} 
+ 
+// ================= BLYNK ================= 
+BLYNK_WRITE(V0) { 
+  if (param.asInt() == 1) { 
+    Serial.println(" Button Pressed"); 
+    startScan(); 
+  } 
+} 
+ 
+// ================= SETUP ================= 
+void setup() { 
+  Serial.begin(115200); 
+ 
+  // LCD setup 
+  display.begin(); 
+  display.setContrast(60); 
+  display.clearDisplay(); 
+  display.setTextSize(1); 
+  display.setTextColor(BLACK); 
+ 
+  display.setCursor(0,0); 
+  display.println("Smart Parking"); 
+  display.setCursor(0,10); 
+  display.println("Ready"); 
+  display.display(); 
+ 
+  // WiFi 
+  WiFi.mode(WIFI_STA); 
+  WiFi.begin(ssid, pass); 
+ 
+  while (WiFi.status() != WL_CONNECTED) { 
+    delay(500); 
+    Serial.print("."); 
+  } 
+ 
+  Serial.println("\n WiFi Connected"); 
+ 
+  // Channel sync 
+  wifi_second_chan_t second; 
+  uint8_t primary; 
+  esp_wifi_get_channel(&primary, &second); 
+  esp_wifi_set_channel(primary, WIFI_SECOND_CHAN_NONE); 
+ 
+  // ESP-NOW 
+  if (esp_now_init() != ESP_OK) { 
+    Serial.println("ESP-NOW Failed"); 
+    return; 
+  } 
+ 
+  esp_now_register_recv_cb(OnDataRecv); 
+ 
+  esp_now_peer_info_t peerInfo = {}; 
+  memcpy(peerInfo.peer_addr, followerMAC, 6); 
+  peerInfo.channel = primary; 
+  peerInfo.encrypt = false; 
+ 
+  esp_now_add_peer(&peerInfo); 
+
+  // Blynk 
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass); 
+} 
+ 
+// ================= LOOP ================= 
+void loop() { 
+  Blynk.run(); 
+}
+
+
+}
